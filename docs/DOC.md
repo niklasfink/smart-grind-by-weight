@@ -323,14 +323,14 @@ Access **Menu → Grind Settings** to configure:
 - **Start on Cup**: Start the active profile automatically when the scale gains ≈50 g within ~2 s (after a short post-boot warmup)
 - **Return on Removal**: Leave the completion screen as soon as that cup weight drops back off the scale
 - **Basket Detection**: Optional portafilter workflow for Auto Start. Capture the empty Single and Double basket/portafilter weights, enable Detect Basket, and adjust the tolerance. When a recognized basket lands on the scale, the firmware selects Single or Double automatically before grinding. No match or ambiguous overlap will not start.
-- **Purging** *(Advanced)*: Control how the grinder saturates itself before weight-mode grinding
-  - **Prime mode**: Keeps the coffee used to saturate the grinder, continues immediately
-  - **Purge mode** (default): Prompts you to discard stale grinds before continuing
-  - **Amount slider**: Configure purge/prime amount (0.1g-2.5g, default 1.0g). Amount is a minimum target; actual output will be slightly higher.
+- **Purging** *(Advanced)*: Control whether stale grounds are discarded before weight-mode grinding
+  - **Prime mode** (default): Keeps all coffee and starts the weight-controlled dose directly
+  - **Purge mode**: Grinds the configured purge amount and prompts you to discard stale grinds before continuing
+  - **Amount slider**: Configure purge amount (0.1g-2.5g, default 1.0g). Amount is a minimum target; actual output will be slightly higher.
   - **"Keep purge grinds from now on" checkbox**: Appears during purge confirmation - switches to Prime mode when checked
 - **Coast Compensation**: Sets how much coffee is expected to keep falling after motor stop. Higher values stop earlier and reduce overshoot; lower values stop later if doses tend to undershoot.
 
-  *Explanation:* The time between motor start and grinds hitting the cup (grind latency) is used to predict the coast time (how long grinds will keep coming after the motor is disengaged). Purging clears stale coffee and saturates the grinder with fresh grounds, ensuring accurate latency detection. If you prefer to keep all coffee without manual intervention, select Prime mode.
+  *Explanation:* The time between motor start and grinds hitting the cup (grind latency) is used to predict the coast time (how long grinds will keep coming after the motor is disengaged). Purging clears stale coffee before the dose. If you prefer to keep all coffee without manual intervention, select Prime mode.
 
 ### Basic Operation
 These steps describe the default grind-by-weight workflow:
@@ -573,10 +573,10 @@ The system uses a **zero-shot learning algorithm** requiring no prior knowledge 
    - 30-second timeout from grind start to completion
    - Noise-adaptive settling detection
 
-2. **Grinder Saturation Phase** (Weight mode only)
-   - Saturates the grinder before main grind for accurate latency detection
-   - Configurable amount: 0.1g-5.0g (default 1.0g)
-   - **Prime mode**: Keeps coffee, continues immediately after settling
+2. **Optional Purge Phase** (Weight mode only)
+   - Runs only when purge mode is set to Remove and grinds are considered stale
+   - Configurable amount: 0.1g-2.5g (default 1.0g)
+   - **Prime mode**: Keeps all coffee and starts the dose directly
    - **Purge mode**: Shows confirmation popup, waits for user to discard stale grinds
    - Logging and chart updates disabled during purge confirmation
 

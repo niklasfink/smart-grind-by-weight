@@ -434,7 +434,7 @@ void MenuScreen::create_grind_mode_page(lv_obj_t* parent) {
         grinder_purge_modes,
         2,
         LV_FLEX_FLOW_ROW,
-        1,  // Purge initially selected (index 1)
+        GRIND_PURGE_MODE_DEFAULT,
         135, 100,  // Width, Height
         grinder_purge_mode_callback,
         this
@@ -1335,7 +1335,7 @@ void MenuScreen::update_grind_mode_toggles() {
 
     // Read current grind mode from main grinder preferences using hardware manager
     int mode_index = 0; // Default to Weight (index 0)
-    int grinder_purge_mode_index = GRIND_PURGE_MODE_DEFAULT;  // Default to Purge
+    int grinder_purge_mode_index = GRIND_PURGE_MODE_DEFAULT;
     float grinder_purge_amount_g = GRIND_PURGE_AMOUNT_DEFAULT_G;  // Default to 1.0g
     if (hardware_manager) {
         Preferences* main_prefs = hardware_manager->get_preferences();

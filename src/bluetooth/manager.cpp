@@ -9,6 +9,7 @@
 #include "../system/performance_monitor.h"
 #include "../system/statistics_manager.h"
 #include "../system/diagnostics_controller.h"
+#include "../system/reset_reason.h"
 #include "../config/constants.h"
 #include "../config/user.h"
 #include "../config/grind_control.h"
@@ -1014,7 +1015,10 @@ void BluetoothManager::update_system_info() {
         "\"heap_total\":%u,"
         "\"heap_used_pct\":%.1f,"
         "\"flash_size\":%u,"
-        "\"cpu_freq\":%u"
+        "\"cpu_freq\":%u,"
+        "\"reset_reason\":\"%s\","
+        "\"reset_reason_code\":%d,"
+        "\"reset_unexpected\":%s"
         "}",
         BUILD_FIRMWARE_VERSION,
         BUILD_NUMBER,
@@ -1025,7 +1029,10 @@ void BluetoothManager::update_system_info() {
         (unsigned int)heap_total,
         heap_usage_percent,
         (unsigned int)flash_size,
-        (unsigned int)ESP.getCpuFreqMHz()
+        (unsigned int)ESP.getCpuFreqMHz(),
+        get_last_reset_reason_label(),
+        get_last_reset_reason_code(),
+        last_reset_was_unexpected() ? "true" : "false"
     );
     
     sysinfo_system_characteristic->setValue(buffer);
@@ -1213,12 +1220,16 @@ void BluetoothManager::generate_diagnostic_report() {
     snprintf(buf, sizeof(buf),
         "[SYSTEM]\n"
         "  Uptime: %02lu:%02lu:%02lu\n"
+        "  Reset: %s (%d)%s\n"
         "  CPU: %lu MHz\n"
         "  Heap: %u KB / %u KB (%.1f%% used)\n"
         "  Flash: %u MB\n"
         "  Driver: %s\n"
         "\n",
         uptime_h, uptime_m, uptime_sec,
+        get_last_reset_reason_label(),
+        get_last_reset_reason_code(),
+        last_reset_was_unexpected() ? " [UNEXPECTED]" : "",
         (unsigned long)ESP.getCpuFreqMHz(),
         (unsigned int)(heap_free / 1024),
         (unsigned int)(heap_total / 1024),

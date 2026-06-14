@@ -14,6 +14,7 @@
 #include "tasks/weight_sampling_task.h"
 #include "tasks/grind_control_task.h"
 #include "tasks/file_io_task.h"
+#include "system/reset_reason.h"
 
 HardwareManager hardware_manager;
 StateMachine state_machine;
@@ -39,22 +40,11 @@ void setup() {
 #endif
     
     // Log reset reason to help diagnose unexpected resets/freeze scenarios
-    esp_reset_reason_t rr = esp_reset_reason();
-    const char* rr_str = "UNKNOWN";
-    switch (rr) {
-        case ESP_RST_POWERON: rr_str = "POWERON"; break;
-        case ESP_RST_EXT: rr_str = "EXT (Reset Pin)"; break;
-        case ESP_RST_SW: rr_str = "SW (esp_restart)"; break;
-        case ESP_RST_PANIC: rr_str = "PANIC (Exception)"; break;
-        case ESP_RST_INT_WDT: rr_str = "INT_WDT"; break;
-        case ESP_RST_TASK_WDT: rr_str = "TASK_WDT"; break;
-        case ESP_RST_WDT: rr_str = "WDT"; break;
-        case ESP_RST_DEEPSLEEP: rr_str = "DEEPSLEEP"; break;
-        case ESP_RST_BROWNOUT: rr_str = "BROWNOUT"; break;
-        case ESP_RST_SDIO: rr_str = "SDIO"; break;
-        default: break;
-    }
-    LOG_BLE("[STARTUP] Reset reason: %s (%d)\n", rr_str, rr);
+    capture_reset_reason();
+    LOG_BLE("[STARTUP] Reset reason: %s (%d)%s\n",
+            get_last_reset_reason_label(),
+            get_last_reset_reason_code(),
+            last_reset_was_unexpected() ? " [UNEXPECTED]" : "");
     
     
     // Early startup heartbeat - helps capture initialization sequence

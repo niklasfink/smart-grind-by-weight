@@ -353,15 +353,19 @@ void GrindController::update() {
             if (!weight_sensor->is_tare_in_progress()) {
                 // Double confirm weights are settled
                 if (weight_sensor->is_settled()) {
-                    if (!grinder->is_grinding()) {
-                        grinder->start();  // Ensure motor is running
-                    }
-                    time_grind_start_ms = loop_data.now;
                     if (mode == GrindMode::TIME) {
+                        if (!grinder->is_grinding()) {
+                            grinder->start();
+                        }
+                        time_grind_start_ms = loop_data.now;
                         switch_phase(GrindPhase::TIME_GRINDING, loop_data);
-                    } else {
-                        // Always run chute operation for weight mode
+                    } else if (should_run_purge_cycle()) {
+                        if (!grinder->is_grinding()) {
+                            grinder->start();
+                        }
                         switch_phase(GrindPhase::PRIME, loop_data);
+                    } else {
+                        enter_predictive_grind(loop_data);
                     }
                 }
             }
@@ -399,30 +403,11 @@ void GrindController::update() {
                 flow_start_confirmed = false;
                 grind_latency_ms = 0;
 
-                // Check if grounds are stale and purge confirmation should be shown
-                bool should_show_purge_popup = false;
-                if (!grinder_purged_since_boot) {
-                    // First grind since boot - grounds are stale
-                    should_show_purge_popup = true;
-                } else {
-                    // Check if enough time has elapsed since last grind
-                    uint64_t current_ms = esp_timer_get_time() / 1000;
-                    uint64_t elapsed_ms = current_ms - last_purge_runtime_ms;
-                    float freshness_hours = preferences ? preferences->getFloat(PREF_KEY_GRIND_FRESHNESS_HOURS, GRIND_FRESHNESS_DEFAULT_HOURS) : GRIND_FRESHNESS_DEFAULT_HOURS;
-                    uint64_t threshold_ms = (uint64_t)(freshness_hours * 3600000.0f);
-                    should_show_purge_popup = (elapsed_ms > threshold_ms);
-                }
-
-                // Determine next phase based on mode AND staleness
-                if (grinder_purge_mode_for_session == GrinderPurgeMode::PURGE && should_show_purge_popup) {
-                    // Purge mode with stale grounds: wait for user confirmation before continuing
+                if (grinder_purge_mode_for_session == GrinderPurgeMode::PURGE) {
                     timeout_pause_start = loop_data.now;  // Track when pause started for timeout offset
                     switch_phase(GrindPhase::PURGE_CONFIRM, loop_data);
                 } else {
-                    // Prime mode OR fresh grounds: continue immediately to grinding
-                    grinder->start();
-                    time_grind_start_ms = loop_data.now;
-                    switch_phase(GrindPhase::PREDICTIVE, loop_data);
+                    enter_predictive_grind(loop_data);
                 }
             }
             break;
@@ -622,6 +607,37 @@ void GrindController::monitor_mechanical_instability(const GrindLoopData& loop_d
     }
 
     last_mechanical_weight_ = loop_data.current_weight;
+}
+
+bool GrindController::should_run_purge_cycle() const {
+    if (mode != GrindMode::WEIGHT || grinder_purge_mode_for_session != GrinderPurgeMode::PURGE) {
+        return false;
+    }
+
+    if (!grinder_purged_since_boot) {
+        return true;
+    }
+
+    uint64_t current_ms = esp_timer_get_time() / 1000;
+    if (last_purge_runtime_ms == 0 || current_ms < last_purge_runtime_ms) {
+        return true;
+    }
+
+    float freshness_hours = preferences
+        ? preferences->getFloat(PREF_KEY_GRIND_FRESHNESS_HOURS, GRIND_FRESHNESS_DEFAULT_HOURS)
+        : GRIND_FRESHNESS_DEFAULT_HOURS;
+    uint64_t threshold_ms = static_cast<uint64_t>(freshness_hours * 3600000.0f);
+    return (current_ms - last_purge_runtime_ms) > threshold_ms;
+}
+
+void GrindController::enter_predictive_grind(const GrindLoopData& loop_data) {
+    if (grinder && !grinder->is_grinding()) {
+        grinder->start();
+    }
+    flow_start_confirmed = false;
+    grind_latency_ms = 0;
+    time_grind_start_ms = loop_data.now;
+    switch_phase(GrindPhase::PREDICTIVE, loop_data);
 }
 
 void GrindController::final_measurement(const GrindLoopData& loop_data) {

@@ -1,4 +1,5 @@
 .pio
+.platformio-core/
 .vscode/
 
 # Generated build info

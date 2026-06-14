@@ -1070,6 +1070,10 @@ class GrinderBLETool:
         self.safe_print(f"   Version:      {system.get('version', 'Unknown')}")
         self.safe_print(f"   Build:        #{system.get('build', 'Unknown')}")
         self.safe_print(f"   Uptime:       {system.get('uptime_h', 0):02d}:{system.get('uptime_m', 0):02d}:{system.get('uptime_s', 0):02d}")
+        reset_reason = system.get('reset_reason', 'Unknown')
+        reset_code = system.get('reset_reason_code', '?')
+        reset_flag = " [UNEXPECTED]" if system.get('reset_unexpected') else ""
+        self.safe_print(f"   Reset:        {reset_reason} ({reset_code}){reset_flag}")
         self.safe_print(f"   CPU Freq:     {system.get('cpu_freq', 'Unknown')} MHz")
         
         # Memory Information  

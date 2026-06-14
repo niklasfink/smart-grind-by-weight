@@ -14,6 +14,7 @@
 #include "../controllers/grind_mode.h"
 #include "../hardware/hardware_manager.h"
 #include "../logging/grind_logging.h"
+#include "../system/reset_reason.h"
 #include "../tasks/task_manager.h"
 
 namespace {
@@ -597,7 +598,8 @@ function pct(v){return Math.round(Number(v)*100)+"%"}
 function setMsg(id,text,cls="muted"){const el=$(id);el.textContent=text;el.className=cls}
 async function json(path,opts){const r=await fetch(path,opts);const t=await r.text();let data={};try{data=t?JSON.parse(t):{}}catch(e){throw new Error(t||r.statusText)}if(!r.ok)throw new Error(data.error||t||r.statusText);return data}
 function renderStatus(s,prefillWifi=false){
-  const rows=[["State",s.status],["Mode",s.mode],["SSID",s.ssid||"--"],["IP",s.ip||"--"],["Host",s.host_url||"--"],["MAC",s.mac||"--"],["RSSI",s.connected?(s.rssi_dbm+" dBm"):"--"],["OTA",s.ota_active?(s.ota_progress+"%"):(s.ota_url||"--")],["Build","#"+s.build],["Version",s.version]];
+  const reset=(s.reset_reason||"--")+(s.reset_unexpected?" !":"");
+  const rows=[["State",s.status],["Mode",s.mode],["SSID",s.ssid||"--"],["IP",s.ip||"--"],["Host",s.host_url||"--"],["MAC",s.mac||"--"],["RSSI",s.connected?(s.rssi_dbm+" dBm"):"--"],["Reset",reset],["OTA",s.ota_active?(s.ota_progress+"%"):(s.ota_url||"--")],["Build","#"+s.build],["Version",s.version]];
   $("statusList").innerHTML=rows.map(r=>"<dt>"+r[0]+"</dt><dd>"+r[1]+"</dd>").join("");
   if(prefillWifi)$("ssid").value=s.setup_ap?"":(s.ssid||"");
 }
@@ -698,6 +700,15 @@ String ConnectivityManager::build_status_json() const {
     json += "\"status\":\"";
     json += json_escape(get_status_label());
     json += "\",";
+    json += "\"reset_reason\":\"";
+    json += json_escape(get_last_reset_reason_label());
+    json += "\",";
+    json += "\"reset_reason_code\":";
+    json += String(get_last_reset_reason_code());
+    json += ",";
+    json += "\"reset_unexpected\":";
+    json += last_reset_was_unexpected() ? "true" : "false";
+    json += ",";
     json += "\"ota_active\":";
     json += ota_in_progress_ ? "true" : "false";
     json += ",";
