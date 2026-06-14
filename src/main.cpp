@@ -81,7 +81,7 @@ void setup() {
     if (ota_failed) {
         LOG_BLE("BOOT: Starting in OTA failure state for expected build %s\n", failed_ota_build.c_str());
         state_machine.init(UIState::OTA_UPDATE_FAILED);
-    } else if (!is_calibrated) {
+    } else if (!is_calibrated && profile_controller.get_grind_mode() != GrindMode::TIME) {
         LOG_BLE("BOOT: Device not calibrated - starting in CALIBRATION state\n");
         state_machine.init(UIState::CALIBRATION);
     } else {

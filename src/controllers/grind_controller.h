@@ -296,6 +296,8 @@ private:
     void monitor_mechanical_instability(const GrindLoopData& loop_data);
     bool should_run_purge_cycle() const;
     void enter_predictive_grind(const GrindLoopData& loop_data);
+    void enter_time_grinding(const GrindLoopData& loop_data);
+    bool has_weight_feedback() const;
 
     bool check_timeout() const;
     uint8_t get_current_phase_id() const;

@@ -117,14 +117,29 @@ void GrindController::start_grind(float target, uint32_t time_ms, GrindMode grin
             millis(), target, (unsigned long)time_ms, grind_mode == GrindMode::TIME ? "TIME" : "WEIGHT");
     if (!grinder) return;
 
-    const bool weight_sensor_available = weight_sensor && !weight_sensor->has_hardware_fault();
-    if (!weight_sensor_available && grind_mode != GrindMode::TIME) {
-        LOG_BLE("ERROR: Cannot start weight grind - load cell unavailable/faulted (%d)\n",
-                weight_sensor ? static_cast<int>(weight_sensor->get_hardware_fault()) : -1);
+    const bool time_mode = grind_mode == GrindMode::TIME;
+    if (!weight_sensor && !time_mode) {
+        LOG_BLE("ERROR: Cannot start weight grind - load cell unavailable\n");
         return;
     }
-    if (!weight_sensor_available && grind_mode == GrindMode::TIME) {
-        LOG_BLE("WARNING: Starting time grind without load cell feedback\n");
+
+    if (weight_sensor && weight_sensor->has_hardware_fault()) {
+        if (!time_mode) {
+            LOG_BLE("ERROR: Cannot start grind - load cell hardware fault detected (%d)\n",
+                    static_cast<int>(weight_sensor->get_hardware_fault()));
+            return;
+        }
+
+        LOG_BLE("WARNING: Starting timed grind without load cell feedback (fault=%d)\n",
+                static_cast<int>(weight_sensor->get_hardware_fault()));
+    } else if (!weight_sensor && time_mode) {
+        LOG_BLE("WARNING: Starting timed grind without a load cell instance\n");
+    }
+
+    if (!time_mode && !has_weight_feedback()) {
+        LOG_BLE("ERROR: Cannot start grind - load cell hardware fault detected (%d)\n",
+                weight_sensor ? static_cast<int>(weight_sensor->get_hardware_fault()) : -1);
+        return;
     }
     
     target_weight = target;
@@ -210,7 +225,7 @@ void GrindController::start_grind(float target, uint32_t time_ms, GrindMode grin
     GrindLoopData loop_data = {};
     loop_data.now = millis();
     loop_data.timestamp_ms = loop_data.now - start_time;
-    loop_data.current_weight = weight_sensor ? weight_sensor->get_weight_low_latency() : 0.0f;
+    loop_data.current_weight = has_weight_feedback() ? weight_sensor->get_weight_low_latency() : 0.0f;
 
     if (active_strategy) {
         active_strategy->on_enter(session_descriptor, strategy_context, loop_data);
@@ -298,16 +313,17 @@ void GrindController::update() {
     if (!is_active()) return;
     
     unsigned long now = millis();
+    const bool weight_feedback_available = has_weight_feedback();
     
     // Calculate all measurement values once at the start - pass to methods to avoid redundant calculations
     GrindLoopData loop_data = {};
     loop_data.now = now;
     loop_data.timestamp_ms = now - start_time;  // Relative to session start
-    loop_data.current_weight = weight_sensor ? weight_sensor->get_weight_low_latency() : 0.0f;
-    loop_data.display_weight = weight_sensor ? weight_sensor->get_display_weight() : 0.0f;
+    loop_data.current_weight = weight_feedback_available ? weight_sensor->get_weight_low_latency() : 0.0f;
+    loop_data.display_weight = weight_feedback_available ? weight_sensor->get_display_weight() : 0.0f;
     loop_data.motor_is_on = grinder ? (grinder->is_grinding() ? 1 : 0) : 0;
     loop_data.phase_id = get_current_phase_id();
-    loop_data.flow_rate = weight_sensor ? weight_sensor->get_flow_rate() : 0.0f;
+    loop_data.flow_rate = weight_feedback_available ? weight_sensor->get_flow_rate() : 0.0f;
     loop_data.weight_delta = loop_data.current_weight - last_logged_weight;
 
     if (control_loop_paused_) {
@@ -335,7 +351,7 @@ void GrindController::update() {
             
         case GrindPhase::SETUP: {
             // Snapshot pre-tare weight so we can log the initial Cup state
-            float pre_tare_weight = weight_sensor ? weight_sensor->get_weight_low_latency() : 0.0f;
+            float pre_tare_weight = weight_feedback_available ? weight_sensor->get_weight_low_latency() : 0.0f;
 
             // Start logging immediately (synchronous PSRAM setup only)
             grind_logger.start_grind_session(session_descriptor, pre_tare_weight);
@@ -346,27 +362,29 @@ void GrindController::update() {
                 event_in_progress.event_flags |= GRIND_EVENT_FLAG_TIME_MODE;
             }
 
+            if (mode == GrindMode::TIME && !weight_feedback_available) {
+                enter_time_grinding(loop_data);
+                break;
+            }
+
             switch_phase(GrindPhase::TARING, loop_data);
             break;
         }
             
         case GrindPhase::TARING:
-            if (mode == GrindMode::TIME && (!weight_sensor || weight_sensor->has_hardware_fault())) {
-                LOG_BLE("[%lums CONTROLLER] Skipping tare for time grind because load cell is unavailable\n", loop_data.now);
-                if (!grinder->is_grinding()) {
-                    grinder->start();
-                }
-                time_grind_start_ms = loop_data.now;
-                switch_phase(GrindPhase::TIME_GRINDING, loop_data);
+            if (mode == GrindMode::TIME && !weight_feedback_available) {
+                enter_time_grinding(loop_data);
                 break;
             }
+
             if (!weight_sensor) {
                 timeout_phase = phase;
-                last_session_result_ = GrindSessionResult::ERROR;
                 set_error_message("Err: scale");
+                last_session_result_ = GrindSessionResult::ERROR;
                 switch_phase(GrindPhase::TIMEOUT, loop_data);
                 break;
             }
+
             if (weight_sensor->start_nonblocking_tare()) {
                 LOG_LOADCELL_DEBUG("Non-blocking tare started\n");
                 switch_phase(GrindPhase::TARE_CONFIRM, loop_data);
@@ -374,21 +392,19 @@ void GrindController::update() {
             break;
             
         case GrindPhase::TARE_CONFIRM:
-            if (mode == GrindMode::TIME && (!weight_sensor || weight_sensor->has_hardware_fault())) {
-                if (!grinder->is_grinding()) {
-                    grinder->start();
-                }
-                time_grind_start_ms = loop_data.now;
-                switch_phase(GrindPhase::TIME_GRINDING, loop_data);
+            if (mode == GrindMode::TIME && !weight_feedback_available) {
+                enter_time_grinding(loop_data);
                 break;
             }
+
             if (!weight_sensor) {
                 timeout_phase = phase;
-                last_session_result_ = GrindSessionResult::ERROR;
                 set_error_message("Err: scale");
+                last_session_result_ = GrindSessionResult::ERROR;
                 switch_phase(GrindPhase::TIMEOUT, loop_data);
                 break;
             }
+
             // Check if tare is complete
             if (!weight_sensor->is_tare_in_progress()) {
                 // Double confirm weights are settled
@@ -491,18 +507,18 @@ void GrindController::update() {
             break;
 
         case GrindPhase::FINAL_SETTLING:
-            if (mode == GrindMode::TIME && (!weight_sensor || weight_sensor->has_hardware_fault())) {
-                final_weight = 0.0f;
-                switch_phase(GrindPhase::COMPLETED, loop_data);
+            if (!weight_feedback_available) {
+                if (mode == GrindMode::TIME) {
+                    final_measurement(loop_data);
+                } else {
+                    timeout_phase = phase;
+                    set_error_message("Err: scale");
+                    last_session_result_ = GrindSessionResult::ERROR;
+                    switch_phase(GrindPhase::TIMEOUT, loop_data);
+                }
                 break;
             }
-            if (!weight_sensor) {
-                timeout_phase = phase;
-                last_session_result_ = GrindSessionResult::ERROR;
-                set_error_message("Err: scale");
-                switch_phase(GrindPhase::TIMEOUT, loop_data);
-                break;
-            }
+
             // Wait for weight to settle with precision settling window
             if (weight_sensor->check_settling_complete(GRIND_SCALE_PRECISION_SETTLING_TIME_MS)) {
                 final_measurement(loop_data);
@@ -513,7 +529,8 @@ void GrindController::update() {
             // Check for additional pulse completion
             if (grinder && grinder->is_pulse_complete()) {
                 LOG_BLE("[%lums CONTROLLER] Additional pulse #%d completed, weight: %.2fg\n", 
-                        millis(), additional_pulse_count, weight_sensor ? weight_sensor->get_display_weight() : 0.0f);
+                        millis(), additional_pulse_count,
+                        has_weight_feedback() ? weight_sensor->get_display_weight() : 0.0f);
                 
                 // Return to completed phase
                 switch_phase(GrindPhase::COMPLETED, loop_data);
@@ -594,6 +611,7 @@ void GrindController::update() {
         phase != GrindPhase::IDLE && phase != GrindPhase::INITIALIZING &&
         phase != GrindPhase::SETUP && phase != GrindPhase::TARING &&
         phase != GrindPhase::TARE_CONFIRM &&
+        weight_feedback_available &&
         grinder->is_motor_settled() &&
         loop_data.current_weight < -1.0f) {
         timeout_phase = phase;
@@ -693,10 +711,9 @@ void GrindController::enter_predictive_grind(const GrindLoopData& loop_data) {
 }
 
 void GrindController::final_measurement(const GrindLoopData& loop_data) {
-    final_weight = weight_sensor ? weight_sensor->get_weight_high_latency() : 0.0f;
+    final_weight = has_weight_feedback() ? weight_sensor->get_weight_high_latency() : 0.0f;
 
-    if (mode == GrindMode::WEIGHT &&
-        (!weight_sensor || target_weight >= 1.0f) &&
+    if (mode == GrindMode::WEIGHT && target_weight >= 1.0f &&
         final_weight < NO_WEIGHT_DELIVERED_THRESHOLD_G) {
         timeout_phase = GrindPhase::FINAL_SETTLING;
         set_error_message("Err: no wt");
@@ -707,6 +724,18 @@ void GrindController::final_measurement(const GrindLoopData& loop_data) {
 
     // Switch to COMPLETED. The state machine will then transition to IDLE on the next tick.
     switch_phase(GrindPhase::COMPLETED, loop_data);
+}
+
+void GrindController::enter_time_grinding(const GrindLoopData& loop_data) {
+    if (!grinder) {
+        return;
+    }
+
+    if (!grinder->is_grinding()) {
+        grinder->start();
+    }
+    time_grind_start_ms = loop_data.now;
+    switch_phase(GrindPhase::TIME_GRINDING, loop_data);
 }
 
 
@@ -808,7 +837,7 @@ void GrindController::switch_phase(GrindPhase new_phase, const GrindLoopData& lo
     event_data.event = UIGrindEvent::PHASE_CHANGED;
     event_data.phase = new_phase;
     event_data.mode = session_descriptor.mode;
-    event_data.current_weight = weight_sensor ? weight_sensor->get_display_weight() : 0.0f;
+    event_data.current_weight = has_weight_feedback() ? weight_sensor->get_display_weight() : 0.0f;
     event_data.progress_percent = get_progress_percent();
     event_data.phase_display_text = get_phase_name(new_phase);
     event_data.show_taring_text = show_taring_text();
@@ -839,8 +868,9 @@ void GrindController::switch_phase(GrindPhase new_phase, const GrindLoopData& lo
 
         event_data.event = UIGrindEvent::COMPLETED;
         // Use final_weight if available (from final_measurement), otherwise use high latency weight
-        event_data.final_weight = (final_weight > 0) ? final_weight : 
-                                 (weight_sensor ? weight_sensor->get_weight_high_latency() : 0.0f);
+        event_data.final_weight = (final_weight > 0 || !has_weight_feedback())
+                                      ? final_weight
+                                      : weight_sensor->get_weight_high_latency();
         
         // For time mode, also indicate pulse availability
         if (mode == GrindMode::TIME) {
@@ -858,7 +888,7 @@ void GrindController::switch_phase(GrindPhase new_phase, const GrindLoopData& lo
         }
         event_data.error_message = last_error_message;
         // Use non-blocking high latency weight instead of precision settled weight
-        event_data.error_weight = weight_sensor ? weight_sensor->get_weight_high_latency() : 0.0f;
+        event_data.error_weight = has_weight_feedback() ? weight_sensor->get_weight_high_latency() : 0.0f;
         event_data.error_progress = get_progress_percent();
     } else if (new_phase == GrindPhase::IDLE) {
         event_data.event = UIGrindEvent::STOPPED;
@@ -879,6 +909,10 @@ bool GrindController::is_active() const {
     return phase != GrindPhase::IDLE;
 }
 
+bool GrindController::has_weight_feedback() const {
+    return weight_sensor && !weight_sensor->has_hardware_fault();
+}
+
 int GrindController::get_progress_percent() const {
     if (active_strategy && session_descriptor.mode == GrindMode::TIME) {
         return active_strategy->progress_percent(session_descriptor, *this);
@@ -888,7 +922,7 @@ int GrindController::get_progress_percent() const {
     
     float ground = (phase == GrindPhase::COMPLETED || phase == GrindPhase::TIMEOUT) 
                    ? final_weight 
-                   : (weight_sensor ? weight_sensor->get_display_weight() : 0.0f);
+                   : (has_weight_feedback() ? weight_sensor->get_display_weight() : 0.0f);
     if (ground < 0) ground = 0;
     int progress = (int)((ground / target_weight) * 100);
     return min(progress, 100);
@@ -937,7 +971,7 @@ void GrindController::send_measurements_data() {
 }
 
 float GrindController::get_current_flow_rate() const {
-    return weight_sensor->get_flow_rate(); 
+    return has_weight_feedback() ? weight_sensor->get_flow_rate() : 0.0f;
 }
 
 void GrindController::set_ui_event_callback(void (*callback)(const GrindEventData&)) {
