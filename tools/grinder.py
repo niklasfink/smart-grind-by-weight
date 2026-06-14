@@ -481,20 +481,26 @@ class GrinderTool:
             ),
             (
                 self.project_dir / "src" / "controllers" / "grind_controller.cpp",
-                "grind_mode != GrindMode::TIME",
+                [
+                    "const bool time_mode = grind_mode == GrindMode::TIME;",
+                    "!time_mode && !has_weight_feedback()",
+                ],
                 "Time grind must remain available when HX711 is disconnected",
             ),
         ]
 
-        for path, needle, message in checks:
+        for path, needles, message in checks:
             try:
                 content = path.read_text()
             except OSError as exc:
                 self.print_error(f"Safety guard check failed: cannot read {path}: {exc}")
                 return False
-            if needle not in content:
+            if isinstance(needles, str):
+                needles = [needles]
+            missing_needles = [needle for needle in needles if needle not in content]
+            if missing_needles:
                 self.print_error(f"Safety guard missing: {message}")
-                self.print_info(f"Expected marker not found in {path}: {needle}")
+                self.print_info(f"Expected marker not found in {path}: {missing_needles[0]}")
                 return False
 
         self.print_success("Source safety guards present")

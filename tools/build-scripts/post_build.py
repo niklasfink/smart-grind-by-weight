@@ -43,6 +43,7 @@ def archive_firmware(source, target, env):
         print(f"❌ Firmware binary not found: {firmware_path}")
         return
     
+    is_debug_build = pioenv.endswith("-debug")
     is_mock_build = pioenv.endswith("-mock")
     is_rescue_build = pioenv.endswith("-rescue-ota")
 
@@ -51,6 +52,8 @@ def archive_firmware(source, target, env):
     cache_dir = os.path.join(project_dir, "firmware_cache")
     if is_rescue_build:
         cache_dir = os.path.join(cache_dir, "rescue")
+    elif is_debug_build:
+        cache_dir = os.path.join(cache_dir, "debug")
     elif is_mock_build:
         cache_dir = os.path.join(cache_dir, "mock")
     
@@ -68,6 +71,8 @@ def archive_firmware(source, target, env):
     archive_name = f"build_{build_number:03d}.bin"
     if is_rescue_build:
         archive_name = f"rescue_build_{build_number:03d}.bin"
+    elif is_debug_build:
+        archive_name = f"debug_build_{build_number:03d}.bin"
     elif is_mock_build:
         archive_name = f"mock_build_{build_number:03d}.bin"
     cached_firmware_path = os.path.join(cache_dir, archive_name)
